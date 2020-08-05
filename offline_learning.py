@@ -48,23 +48,30 @@ if __name__ == "__main__":
 		# set up logging severity
 		log.setLevel(logging.DEBUG)
 		# ------------From Ibrahim's controller.py script
-
 	
 		exp_params = {}
-		# how to set prediction sections
-		relearn_interval_kwargs = {'days':7, 'hours':0, 'minutes':0, 'seconds':0}
-		# weeks to look back into for retraining
-		retrain_range_weeks = 13
-		# number of epochs to train dynamic models
-		epochs = 20000
-		# num of steps to learn rl in each train method
-		rl_train_steps = 50000
-		# time stamp of the last time point in the 1 week test data; used to get tsdb data call
-		time_stamp = datetime(year = 2020, month = 2, day = 15, hour=0, minute=0, second=0)
 		# interval num for relearning : look at logs/Interval{} and write next number to prevent overwrite
 		interval = 1
+		# how to set prediction sections
+		relearn_interval_kwargs = {'days':0, 'hours':12, 'minutes':0, 'seconds':0}
+		# weeks to look back into for retraining
+		retrain_range_weeks = 20
+		# weeks to train rl on 
+		retrain_range_rl_weeks = 2
+		# use validation loss in lstm or not
+		use_val = True
+		# number of epochs to train dynamic models
+		epochs = 20000
+		# period of data; 1 => 5 mins, 6 => 30 mins
+		period = 6 
+		# num of steps to learn rl in each train method
+		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*60)
+		# reinitialize agent at the end of every learning iteration
+		reinit_agent = True
+		# time stamp of the last time point in the 1 week test data; used to get tsdb data call
+		time_stamp = datetime(year = 2019, month = 6, day = 1, hour=0, minute=0, second=0)
 		# week_num to end
-		week2end = 24
+		week2end = 52
 		# reinitialize agent at the end of every learning iteration
 		reinit_agent = False
 
@@ -153,6 +160,7 @@ if __name__ == "__main__":
 									'lstm_weights_lock':lstm_weights_lock,
 									'relearn_interval_kwargs':relearn_interval_kwargs,
 									'retrain_range_weeks':retrain_range_weeks,
+									'retrain_range_rl_weeks':retrain_range_rl_weeks,
 									'env_data_available':env_data_available,
 									'env_train_data_lock':env_train_data_lock,
 									'agg' : agg,
@@ -177,7 +185,8 @@ if __name__ == "__main__":
 									'hwe_model_config':exp_params['hwe_model_config'],
 									'vlv_model_config':exp_params['vlv_model_config'],
 									'save_path': save_path,
-									'logger':log})
+									'logger':log,
+									'use_val':use_val})
 		model_learn_th.start()
 
 		ctrl_learn_th = Thread(target=ctlearn.controller_learn, daemon = False,
@@ -195,7 +204,7 @@ if __name__ == "__main__":
 								'interval' : interval,
 								'online_mode' : online_mode,
 								'reinit_agent' : reinit_agent,
-								'logger':log})
+								'logger':log,})
 		ctrl_learn_th.start()
 
 		try:

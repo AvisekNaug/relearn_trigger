@@ -36,7 +36,7 @@ def controller_learn(*args, **kwargs):
 		interval = kwargs['interval']
 		env_created = False
 		agent_created = False
-		writeheader = True
+		writeheader, first_loop = True, True
 		# to_break = False
 		reinit_agent = kwargs['reinit_agent']
 		online_mode = kwargs['online_mode']
@@ -56,12 +56,19 @@ def controller_learn(*args, **kwargs):
 				env_data_available.clear()
 				log.info('Control Learn Module: Environment Data loaded')
 
-				with lstm_weights_lock:
-					cwe_energy_model  =load_model(kwargs['env_config']['model_path']+'cwe_best_model')
-					hwe_energy_model  =load_model(kwargs['env_config']['model_path']+'hwe_best_model')
-					vlv_energy_model  =load_model(kwargs['env_config']['model_path']+'vlv_best_model')
+				if first_loop: # acts as a first loop indicator, that's why used here
+					with lstm_weights_lock:
+						cwe_energy_model  =load_model(kwargs['env_config']['model_path']+'cwe_best_model')
+						hwe_energy_model  =load_model(kwargs['env_config']['model_path']+'hwe_best_model')
+						vlv_energy_model  =load_model(kwargs['env_config']['model_path']+'vlv_best_model')
+						log.info('Control Learn Module: Env Dynamic Models loaded')
+				else:
+					with lstm_weights_lock:
+						cwe_energy_model.load_weights(kwargs['env_config']['model_path']+'cwe_best_model')
+						hwe_energy_model.load_weights(kwargs['env_config']['model_path']+'hwe_best_model')
+						vlv_energy_model.load_weights(kwargs['env_config']['model_path']+'vlv_best_model')
+						log.info('Control Learn Module: Env Dynamic Models Re-loaded')
 				lstm_weights_available.clear()
-				log.info('Control Learn Module: Env Dynamic Models loaded')
 
 				"""create environment with new data"""
 				monitor_dir = kwargs['env_config']['logs']+'Interval_{}/'.format(interval)

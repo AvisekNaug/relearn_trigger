@@ -62,7 +62,7 @@ def update_graph_scatter(_):
                         layout=go.Layout(
                                     yaxis = {'title' : 'Temperature(F) and Relative Humidity',
                                     'color' : 'black', }, autosize = True,
-                                    title = {'text' : 'Demo of PPO RL Controller applied to Alumni Hall AHU',
+                                    title = {'text' : 'Demo of PPO RL Controller applied to Alumni Hall AHU with relearn trigger',
                                              'font' : {'color' : 'black', 'size' : 24, 'family' : "Times New Roman"}},
                                     hovermode='x'
                                     ), 
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     app.run_server(debug=False, host = '129.59.104.221', port = 8810)
 
 # To run as a safe production server, run it as 
-# waitress-serve --host 129.59.104.221 --port 8810 live_plot:app.server
+# waitress-serve --host 129.59.104.221 --port 8811 live_plot:app.server
 
 # ps -u nauga (except sudo influxd which we get from ps -auxf)
 # kill -9 PID

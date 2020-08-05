@@ -751,6 +751,8 @@ class dataframescaler():
 	An attempt at creating a class that can scale or inverse scale any variable
 	individually or collectively of a dataframe once, the original raw and cleaned values
 	are given
+	*input_columns and df_2scale_columns exist as separate vars in case one wants to scale them
+	using a different set of variables
 	"""
 	def __init__(self, df: Union[str, pd.DataFrame, dict]):
 		

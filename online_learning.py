@@ -110,7 +110,7 @@ if __name__ == "__main__":
 			'lstm_layers' : 6, 'lstm_units': 8, 'activation_lstm' : 'relu',
 			'save_path': cwe_data, 'model_path': model_path, 'name': 'cwe', 'epochs' : epochs
 		}
-		cwe_vars = ['pchw_flow', 'oah', 'wbt',  'sat', 'oat', 'cwe']
+		cwe_vars = ['pchw_flow', 'oat', 'oah', 'wbt', 'sat', 'cwe']
 
 		exp_params['hwe_model_config'] = {
 			'model_type': 'regresion', 'train_batchsize' : 16,

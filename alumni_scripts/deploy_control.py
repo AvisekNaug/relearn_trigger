@@ -50,13 +50,13 @@ def deploy_control(*args, **kwargs):
 		period = kwargs['period']
 
 		# an initial trained model has to exist
-		if agent_weights_available.is_set():
-			with agent_weights_lock:
-				rl_agent = PPO2.load(kwargs['best_rl_agent_path'])
-			agent_weights_available.clear()
-			log.info('Deploy Control Module: Controller Weights Read from offline phase')
-		else:
-			raise FileNotFoundError
+		log.info('Deploy Control Module: Controller not ready for deployment. Wait for some time')
+		agent_weights_available.wait()
+		with agent_weights_lock:
+			rl_agent = PPO2.load(kwargs['best_rl_agent_path'])
+		agent_weights_available.clear()
+		log.info('Deploy Control Module: Controller Weights Read from offline phase')
+				
 
 		while not end_learning.is_set():
 		
