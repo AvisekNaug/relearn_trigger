@@ -150,17 +150,17 @@ def controller_learn(*args, **kwargs):
 				log.info("Control Learn Module: Environment Set to train mode")
 				env.env_method('trainenv')
 				with agent_weights_lock:
-					agent = ppo_agent.train_agent(agent, env = env, steps=kwargs['rl_train_steps'])
+					ppo_agent.train_agent(agent, env = env, steps=kwargs['rl_train_steps'])
 
 				"""test rl model"""
 				log.info("Control Learn Module: Environment Set to test mode")
 				env.env_method('testenv')
 				# provide path to the current best rl agent weights and test it
 				with agent_weights_lock:
-					test_perf_log = ppo_agent.test_agent(best_rl_agent_path, env, num_episodes=1)
+					test_perf_log = ppo_agent.test_agent(agent, best_rl_agent_path, env, num_episodes=1)
 				
-				if online_mode: 
-					agent_weights_available.set()  # agent weights are available for deployment thread
+				# if online_mode:
+				agent_weights_available.set()  # agent weights are available for deployment thread
 				# save the performance data
 				rl_perf_save(test_perf_log_list=test_perf_log, log_dir=kwargs['rl_perf_data'],
 								save_as= 'csv', header=writeheader)

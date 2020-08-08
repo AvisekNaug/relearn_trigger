@@ -49,14 +49,12 @@ def offline_data_gen(*args, **kwargs):
 		lstm_train_data_lock : Lock = kwargs['lstm_train_data_lock']  # prevent dataloop from writing data
 		env_train_data_lock : Lock = kwargs['env_train_data_lock']  # prevent dataloop from writing data  # pylint: disable=unused-variable
 
-		# relearn interval in date time format
-		relearn_interval_kwargs = kwargs['relearn_interval_kwargs']
 		# retrain range in weeks
 		retrain_range_weeks = kwargs['retrain_range_weeks']
 		# rl retrain weeks
 		retrain_range_rl_weeks = kwargs['retrain_range_rl_weeks']
 		# week_num to end
-		week2end = kwargs['week2end']
+		# week2end = kwargs['week2end']
  
 
 		client = DataFrameClient(host='localhost', port=8086, database=kwargs['database'],)
@@ -122,15 +120,9 @@ def offline_data_gen(*args, **kwargs):
 				env_data_available.set()  # data is now available for agent and env training
 
 				log.info('OfflineDataGen: Dynamic Model and Gym Env data available')
-
-				time_stamp += timedelta(**relearn_interval_kwargs)
 				week_num += 1
 				week_num = week_num if week_num%53 != 0 else 1
 				year_num = year_num if week_num!= 1 else year_num+1
-
-				if week_num == week2end:  # can be other terminating condition like year==2020 & week=5 etc
-					end_learning.set()
-					break
 	
 	except Exception as e:
 		log.error('Off-Line Data Generator Module: %s', str(e))

@@ -55,14 +55,14 @@ def train_agent(agent, env=None, steps=30000, tb_log_name = "../log/ppo2_event_f
 	"""
 
 	global best_mean_reward
+	global total_time_steps
+	total_time_steps = 0
 	best_mean_reward = -np.inf
 
 	if env is not None:
 		agent.set_env(env)
 	
-	trained_agent = agent.learn(total_timesteps=steps, callback=CustomCallBack)
-
-	return trained_agent
+	agent.learn(total_timesteps=steps, callback=CustomCallBack)
 
 def CustomCallBack(_locals, _globals):
 	"""
@@ -120,11 +120,10 @@ def CustomCallBack(_locals, _globals):
 
 	return True
 
-def test_agent(agent_weight_path: str, env, num_episodes = 1):
+def test_agent(agent, agent_weight_path: str, env, num_episodes = 1):
 
 	# load agent weights
-	agent = PPO2.load(agent_weight_path, 
-					env)
+	agent.load_parameters(agent_weight_path)
 	
 	"""
 	num_envs is an attribute of any vectorized environment

@@ -11,6 +11,7 @@ from multiprocessing import Event, Lock
 import time
 import pytz
 from dateutil import tz
+from influxdb import DataFrameClient
 
 import warnings
 with warnings.catch_warnings():
@@ -18,6 +19,7 @@ with warnings.catch_warnings():
 	from alumni_scripts import data_process as dp
 	from alumni_scripts import alumni_data_utils as a_utils
 	from alumni_scripts import reward_trigger as rt
+	from alumni_scripts import data_generator as datagen
 	from CoolProp.HumidAirProp import HAPropsSI
 
 def deploy_control(*args, **kwargs):
@@ -27,8 +29,6 @@ def deploy_control(*args, **kwargs):
 	# logger
 	log = kwargs['logger']
 	try:
-		with open('auths.json', 'r') as fp:
-			api_args = json.load(fp)
 		with open('alumni_scripts/meta_data.json', 'r') as fp:
 			meta_data_ = json.load(fp)
 		if not path.exists("experience.csv"):
@@ -36,6 +36,9 @@ def deploy_control(*args, **kwargs):
 				cfile.write('{},{},{},{},{},{},{},{}\n'.format('time', 'oat', 'oah', 'wbt',
 				'avg_stpt', 'sat', 'rlstpt', 'hist_stpt'))
 			cfile.close()
+		with open('deployment_reward.csv', 'w') as cfile:
+			cfile.write('{},{}\n'.format('time','reward'))
+		cfile.close()
 
 		agent_weights_available : Event = kwargs['agent_weights_available']  # deploy loop can read the agent weights now
 		end_learning : Event = kwargs['end_learning']
@@ -47,22 +50,37 @@ def deploy_control(*args, **kwargs):
 		stpt_delta = np.array([0.0]) # in delta F
 		stpt_unscaled = np.array([68.0])  # in F
 		stpt_scaled = scaler.minmax_scale(stpt_unscaled, ['sat'], ['sat'])
-		not_first_loop = True
+		not_first_loop = False
 		period = kwargs['period']
+		time_stamp = kwargs['time_stamp']
+		lookback_dur_min = kwargs['lookback_dur_min']
+		measurement = kwargs['measurement']
+		# database client
+		client = DataFrameClient(host='localhost', port=8086, database=kwargs['database'],)
+
+		# variables for rewrd trigger module
+		reward_processor_params = kwargs['reward_processor_params']
+		offline_data_gen_params = kwargs['offline_data_gen_params']
+
+		# initiate reward_trigger class
+		rwd_processor = rt.deployment_reward_processor(**reward_processor_params)
+
 
 		# an initial trained model has to exist
 		log.info('Deploy Control Module: Controller not ready for deployment. Wait for some time')
 		agent_weights_available.wait()
+		log.info('Deploy Control Module: Controller is ready for initial deployment')
 		with agent_weights_lock:
 			rl_agent = PPO2.load(kwargs['best_rl_agent_path'])
 		agent_weights_available.clear()
 		log.info('Deploy Control Module: Controller Weights Read from offline phase')
-				
 
 		while not end_learning.is_set():
 		
 			# get current scaled and uncsaled observation
-			df, df_unscaled, hist_stpt = get_real_obs(api_args, meta_data_, obs_space_vars, scaler, period, log)
+			df, df_unscaled, hist_stpt, hist_stpt_scaled = get_real_obs(client, time_stamp, meta_data_, obs_space_vars,
+														 scaler, period, log,
+														lookback_dur_min, measurement)
 			curr_obs_scaled = df.to_numpy().flatten()
 			curr_obs_unscaled = df_unscaled.to_numpy().flatten()
 
@@ -80,10 +98,32 @@ def deploy_control(*args, **kwargs):
 			# check individual values to not move too much from previous value
 			# nominal values already checked within online_data_clean method
 
+			# calculate the reward value
+			rwd = rwd_processor.calculate_deployment_reward(**{'vars_next' : df,
+															   'rl_env_action' : stpt_scaled,
+															   'rbc_env_action' : hist_stpt_scaled})
+			# save rwd into a csv file
+			with open('deployment_reward.csv', 'a+') as cfile:
+					cfile.write('{},{:.3f}\n'.format( time_stamp, float(rwd) ))
+			cfile.close()
+
+			# TODO: decide whether relearning has to happen or not
+			relearn_triggered = False
+			if relearn_triggered:
+				log.info('Deploy Control Module: Relearn has been Triggered')
+				# create train data
+				offline_data_gen_params.update({'time_stamp': time_stamp})
+				datagen.offline_data_gen(**offline_data_gen_params)
+				log.info('Deploy Control Module: Wait until controller has been relearned')
+				agent_weights_available.wait() # wait until new controller weights are generated
+				log.info('Deploy Control Module: Controller has been relearned')
+
+									   
+
 			# get new agent model in case it is available
 			if agent_weights_available.is_set():
 				with agent_weights_lock:
-					rl_agent = PPO2.load(kwargs['best_rl_agent_path'])
+					rl_agent.load_parameters(kwargs['best_rl_agent_path'])
 				agent_weights_available.clear()
 				log.info('Deploy Control Module: Controller Weights Adapted')
 
@@ -110,8 +150,10 @@ def deploy_control(*args, **kwargs):
 				fout[1], fout[2], fout[3], fout[4], fout[5], fout[6]))
 			cfile.close()
 
-			# sleep for 30 mins before next output
-			time.sleep(timedelta(minutes=30).seconds)
+			# advance by 30 mins for next step
+			time_stamp += timedelta(**{'days':0, 'hours':0, 'minutes':30, 'seconds':0})
+
+			# TODO: decide how to set end learning
 
 	except Exception as e:
 		log.error('Deploy Control Module: %s', str(e))
@@ -119,90 +161,51 @@ def deploy_control(*args, **kwargs):
 
 
 
-def get_real_obs(api_args: dict, meta_data_: dict, obs_space_vars : list, scaler, period, log):
+def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, scaler, period, log, 
+							lookback_dur_min, measurement):
 
 	try:
-		# arguements for the api query
-		time_args = {'trend_id' : '2681', 'save_path' : 'data/trend_data/alumni_data_deployment.csv'}
-		start_fields = ['start_'+i for i in ['year','month','day', 'hour', 'minute', 'second']]
-		end_fields = ['end_'+i for i in ['year','month','day', 'hour', 'minute', 'second']]
-		end_time = datetime.now(tz=pytz.utc)
-		time_gap_minutes = int((period+3)*5)
-		start_time = end_time - timedelta(minutes=time_gap_minutes)
-		for idx, i in enumerate(start_fields):
-			time_args[i] = start_time.timetuple()[idx]
-		for idx, i in enumerate(end_fields):
-			time_args[i] = end_time.timetuple()[idx]
-		api_args.update(time_args)
 
-		# pull the data into csv file
-		try:
-			dp.pull_online_data(**api_args)
-			log.info('Deploy Control Module: Deployment Data obtained from API')
-		except Exception:
-			log.info('Deploy Control Module: BdX API could not get data: will resuse old data')
-
-		# get the dataframe from a csv
-		df_ = read_csv('data/trend_data/alumni_data_deployment.csv', )
-		df_['time'] = to_datetime(df_['time'])
-		to_zone = tz.tzlocal()
-		df_['time'] = df_['time'].apply(lambda x: x.astimezone(to_zone)) # convert time to loca timezones
-		df_.set_index(keys='time',inplace=True, drop = True)
-		df_ = a_utils.dropNaNrows(df_)
-
-		# add wet bulb temperature to the data
-		log.info('Deploy Control Module: Start of Wet Bulb Data Calculation')
-		rh = df_['WeatherDataProfile humidity']/100
-		rh = rh.to_numpy()
-		t_db = 5*(df_['AHU_1 outdoorAirTemp']-32)/9 + 273.15
-		t_db = t_db.to_numpy()
-		T = HAPropsSI('T_wb','R',rh,'T',t_db,'P',101325)
-		t_f = 9*(T-273.15)/5 + 32
-		df_['wbt'] = t_f
-		log.info('Deploy Control Module: Wet Bulb Data Calculated')
-
-		# rename the columns
-		new_names = []
-		for i in df_.columns:
-			new_names.append(meta_data_["reverse_col_alias"][i])
-		df_.columns = new_names
+		log.info('Deploy Control Module: Getting Data from TSDB')
+		result_obj = client.query("select * from {} where time >= '{}' - {}w \
+								and time < '{}'".format(measurement, \
+								str(time_stamp),lookback_dur_min,str(time_stamp)))
+		df_= result_obj[measurement]
+		df_ = df_.drop(columns = ['data_cleaned', 'aggregated', 'time-interval'])
 
 		# collect current set point
 		hist_stpt = df_.loc[df_.index[-1],['sat_stpt']].to_numpy().copy().flatten()
 
-		# clean the data
-		df_cleaned = dp.online_data_clean(
-			meta_data_ = meta_data_, df = df_
-		)
-
 		# clip less than 0 values
-		df_cleaned.clip(lower=0, inplace=True)
+		df_.clip(lower=0, inplace=True)
 
 		# aggregate data
 		rolling_sum_target, rolling_mean_target = [], []
-		for col_name in df_cleaned.columns:
+		for col_name in df_.columns:
 			if meta_data_['column_agg_type'][col_name] == 'sum' : rolling_sum_target.append(col_name)
 			else: rolling_mean_target.append(col_name)
-		df_cleaned[rolling_sum_target] =  a_utils.window_sum(df_cleaned, window_size=6, column_names=rolling_sum_target)
-		df_cleaned[rolling_mean_target] =  a_utils.window_mean(df_cleaned, window_size=6, column_names=rolling_mean_target)
-		df_cleaned = a_utils.dropNaNrows(df_cleaned)
+		df_[rolling_sum_target] =  a_utils.window_sum(df_, window_size=6, column_names=rolling_sum_target)
+		df_[rolling_mean_target] =  a_utils.window_mean(df_, window_size=6, column_names=rolling_mean_target)
+		df_ = a_utils.dropNaNrows(df_)
 
 		# Sample the last half hour data
-		df_cleaned = df_cleaned.iloc[[-1],:]
+		df_ = df_.iloc[[-1],:]
 
 		# also need an unscaled version of the observation for logging
-		df_unscaled = df_cleaned.copy()
+		df_unscaled = df_.copy()
 
 		# scale the columns: here we will use min-max
-		df_cleaned[df_cleaned.columns] = scaler.minmax_scale(df_cleaned, df_cleaned.columns, df_cleaned.columns)
+		df_[df_.columns] = scaler.minmax_scale(df_, df_.columns, df_.columns)
+
+		hist_stpt_scaled = df_.loc[df_.index[-1],['sat_stpt']].to_numpy().copy().flatten()
 
 		# create avg_stpt column
-		stpt_cols = [ele for ele in df_cleaned.columns if 'vrf' in ele]
-		df_cleaned['avg_stpt'] = df_cleaned[stpt_cols].mean(axis=1)
+		stpt_cols = [ele for ele in df_.columns if 'vrf' in ele]
+		df_['avg_stpt'] = df_[stpt_cols].mean(axis=1)
 		# drop individual set point cols
-		df_cleaned.drop( columns = stpt_cols, inplace = True)
+		df_.drop( columns = stpt_cols, inplace = True)
 		# rearrange observation cols
-		df_cleaned = df_cleaned[obs_space_vars]
+		df_ = df_[obs_space_vars]
 
 		# create avg_stpt column
 		stpt_cols = [ele for ele in df_unscaled.columns if 'vrf' in ele]
@@ -212,7 +215,7 @@ def get_real_obs(api_args: dict, meta_data_: dict, obs_space_vars : list, scaler
 		# rearrange observation cols
 		df_unscaled = df_unscaled[obs_space_vars] 
 
-		return df_cleaned, df_unscaled, hist_stpt
+		return df_, df_unscaled, hist_stpt, hist_stpt_scaled
 
 	except Exception as e:
 		log.error('Deploy Control Module: %s', str(e))

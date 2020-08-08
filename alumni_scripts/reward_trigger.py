@@ -51,7 +51,7 @@ class deployment_reward_processor():
 					self.vlv_energy_model = load_model(self.dynamic_model_path+'vlv_best_model')
 
 		except Exception as e:
-			self.log.error('Reward Trigger Module: %s', str(e))
+			self.log.error('Reward Trigger Init Module: %s', str(e))
 			self.log.debug(e, exc_info=True)
 
 	
@@ -65,20 +65,20 @@ class deployment_reward_processor():
 					self.vlv_energy_model.load_weights(self.dynamic_model_path +'vlv_best_model')
 		
 		except Exception as e:
-			self.log.error('Reward Trigger Module: %s', str(e))
+			self.log.error('Reward Trigger Reload Module: %s', str(e))
 			self.log.debug(e, exc_info=True)
 
 
 	def calculate_deployment_reward(self, *args, **kwargs):
 		
 		try:
-			# the current state of the environment and action taken by the deployed agent
+			# the obs variables of the environment and action taken by the deployed agent
 			s : DataFrame = kwargs['vars_next']
-			rl_a = kwargs['rl_env_action']
-			rbc_a  = kwargs['rbc_env_action']
+			rl_a = kwargs['rl_set_point']
+			rbc_a  = kwargs['rbc_set_point']
 
 			if not self.nomralized_data:
-				s = self.scaler.minmax_scale(s, s.columns, s.columns)
+				s[s.columns] = self.scaler.minmax_scale(s, s.columns, s.columns)
 				rl_a = self.scaler.minmax_scale(rl_a, self.a_name, self.a_name)
 				rbc_a = self.scaler.minmax_scale(rbc_a, self.a_name, self.a_name)
 			
@@ -121,7 +121,7 @@ class deployment_reward_processor():
 			return reward
 		
 		except Exception as e:
-			self.log.error('Reward Trigger Module: %s', str(e))
+			self.log.error('Reward Trigger Calculate Deplyment Reward Module: %s', str(e))
 			self.log.debug(e, exc_info=True)
 
 	def calculate_energy(self,s,a):
@@ -170,5 +170,5 @@ class deployment_reward_processor():
 			return cooling_energy, heating_energy
 		
 		except Exception as e:
-			self.log.error('Reward Trigger Module: %s', str(e))
+			self.log.error('Reward Trigger Calculate Energy Module: %s', str(e))
 			self.log.debug(e, exc_info=True)
