@@ -53,7 +53,7 @@ if __name__ == "__main__":
 		# interval num for relearning : look at logs/Interval{} and write next number to prevent overwrite
 		interval = 1
 		# how to set prediction sections
-		relearn_interval_kwargs = {'days':0, 'hours':12, 'minutes':0, 'seconds':0}
+		# relearn_interval_kwargs = {'days':0, 'hours':12, 'minutes':0, 'seconds':0}
 		# weeks to look back into for retraining
 		retrain_range_weeks = 15
 		# weeks to train rl on 
@@ -65,11 +65,11 @@ if __name__ == "__main__":
 		# period of data; 1 => 5 mins, 6 => 30 mins
 		period = 6 
 		# num of steps to learn rl in each train method
-		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*3)
+		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*5)
 		# reinitialize agent at the end of every learning iteration
 		reinit_agent = True
 		# time stamp of the last time point in the 1 week test data; used to get tsdb data call
-		time_stamp = datetime(year = 2019, month = 3, day = 1, hour=0, minute=0, second=0)
+		time_stamp = datetime(year = 2019, month = 4, day = 16, hour=0, minute=0, second=0)
 		# time duration to look back at for querying deployment data
 		lookback_dur_min = 40
 		# week_num to end
@@ -177,7 +177,6 @@ if __name__ == "__main__":
 		offline_data_gen_params = {'lstm_data_available':lstm_data_available,
 									'lstm_train_data_lock':lstm_train_data_lock,
 									'lstm_weights_lock':lstm_weights_lock,
-									'relearn_interval_kwargs':relearn_interval_kwargs,
 									'retrain_range_weeks':retrain_range_weeks,
 									'retrain_range_rl_weeks':retrain_range_rl_weeks,
 									'env_data_available':env_data_available,
@@ -200,7 +199,6 @@ if __name__ == "__main__":
 									'obs_space_vars' : exp_params['env_config']['obs_space_vars'],
 									'scaler' : scaler,
 									'best_rl_agent_path' : best_rl_agent_path,
-									'relearn_interval_kwargs' : relearn_interval_kwargs,
 									'period' : period,
 									'end_learning': end_learning,
 									'logger':log,

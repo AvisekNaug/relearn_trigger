@@ -39,6 +39,9 @@ def deploy_control(*args, **kwargs):
 		with open('deployment_reward.csv', 'w') as cfile:
 			cfile.write('{},{}\n'.format('time','reward'))
 		cfile.close()
+		with open('reward_trigger.csv', 'w') as cfile:
+			cfile.write('{},{}\n'.format('time','status'))
+		cfile.close()
 
 		agent_weights_available : Event = kwargs['agent_weights_available']  # deploy loop can read the agent weights now
 		end_learning : Event = kwargs['end_learning']
@@ -114,12 +117,17 @@ def deploy_control(*args, **kwargs):
 			cfile.close()
 
 			
-			# how long to wait form last training
-			to_relearn = False #last_relearn_steps > 6  # True if no issue with frequent relearning or False if no relearning at all
+			# how long to wait form last training 48 poitsn= 1 day at 1/2 hour intervals
+			to_relearn = last_relearn_steps > 48  # True if no issue with frequent relearning or False if no relearning at all
 
 			# TODO: decide whether relearning has to happen or not
 			if rt.reward_trigger_event(**{'file_name':'deployment_reward.csv'}) & to_relearn:
+				
 				log.info('Deploy Control Module: Relearn has been Triggered')
+				# log time point at which it happened
+				with open('reward_trigger.csv', 'a+') as cfile:
+					cfile.write('{},{}\n'.format(time_stamp,1))
+				cfile.close()
 				# create train data
 				offline_data_gen_params.update({'time_stamp': time_stamp})
 				datagen.offline_data_gen(**offline_data_gen_params)
@@ -133,6 +141,9 @@ def deploy_control(*args, **kwargs):
 					rwd_processor.reload_models()
 					log.info('Reward Processor Module: LSTM Weights Reloaded from latest training phase')
 			else:
+				with open('reward_trigger.csv', 'a+') as cfile:
+					cfile.write('{},{}\n'.format(time_stamp,0))
+				cfile.close()
 				last_relearn_steps += 1
 
 									   
@@ -171,8 +182,8 @@ def deploy_control(*args, **kwargs):
 			time_stamp += timedelta(**{'days':0, 'hours':0, 'minutes':30, 'seconds':0})
 
 			# how to set end learning
-			year_num, week_num, _ = time_stamp.isocalendar()
-			if (year_num==2019) & (week_num==30):
+			time_stamp_end = datetime(year = 2019, month = 6, day = 15, hour=0, minute=0, second=0)
+			if time_stamp > time_stamp_end:
 				end_learning.set()
 
 

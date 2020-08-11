@@ -198,7 +198,7 @@ def statistical_meaningfulness(*args, **kwargs):
 	x = df['time'].to_numpy().flatten()
 	y = df['reward'].to_numpy().flatten()
 
-	min_length = 24
+	min_length = 48
 
 	# do not relearn if num of points is very low
 	if x.shape[0]<min_length:
