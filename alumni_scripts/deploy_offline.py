@@ -4,7 +4,7 @@ and issue a temperature set point to be sent as the set point for the building.
 """
 from os import path
 import numpy as np
-from pandas import read_csv, to_datetime, DataFrame
+from pandas import read_csv, to_datetime, DataFrame, read_pickle
 import json
 from datetime import datetime, timedelta
 from multiprocessing import Event, Lock
@@ -43,6 +43,7 @@ def deploy_control(*args, **kwargs):
 		agent_weights_available : Event = kwargs['agent_weights_available']  # deploy loop can read the agent weights now
 		end_learning : Event = kwargs['end_learning']
 		agent_weights_lock : Lock = kwargs['agent_weights_lock']  # prevent data read/write access
+		lstm_weights_lock : Lock = kwargs['lstm_weights_lock']  # prevent data read/write access
 		
 		# check variables if needed
 		obs_space_vars : list = kwargs['obs_space_vars']
@@ -57,28 +58,33 @@ def deploy_control(*args, **kwargs):
 		measurement = kwargs['measurement']
 		# database client
 		client = DataFrameClient(host='localhost', port=8086, database=kwargs['database'],)
+		# number of deploymnet steps passed till last learning
+		last_relearn_steps = 0
 
 		# variables for rewrd trigger module
 		reward_processor_params = kwargs['reward_processor_params']
 		offline_data_gen_params = kwargs['offline_data_gen_params']
 
-		# initiate reward_trigger class
-		rwd_processor = rt.deployment_reward_processor(**reward_processor_params)
-
-
 		# an initial trained model has to exist
 		log.info('Deploy Control Module: Controller not ready for deployment. Wait for some time')
+		# generate data and automatically initiate first round of model and controller training
+		offline_data_gen_params.update({'time_stamp': time_stamp})
+		datagen.offline_data_gen(**offline_data_gen_params)
 		agent_weights_available.wait()
 		log.info('Deploy Control Module: Controller is ready for initial deployment')
 		with agent_weights_lock:
 			rl_agent = PPO2.load(kwargs['best_rl_agent_path'])
 		agent_weights_available.clear()
-		log.info('Deploy Control Module: Controller Weights Read from offline phase')
+		log.info('Deploy Control Module: Controller Weights Read from training phase')
+		with lstm_weights_lock:
+			# initiate reward_trigger class
+			rwd_processor = rt.deployment_reward_processor(**reward_processor_params)
+			log.info('Deploy Control Module: LSTM Weights Read from training phase')
 
 		while not end_learning.is_set():
 		
 			# get current scaled and uncsaled observation
-			df, df_unscaled, hist_stpt, hist_stpt_scaled = get_real_obs(client, time_stamp, meta_data_, obs_space_vars,
+			df, df_unscaled, hist_stpt, hist_stpt_scaled, vars_next = get_real_obs(client, time_stamp, meta_data_, obs_space_vars,
 														 scaler, period, log,
 														lookback_dur_min, measurement)
 			curr_obs_scaled = df.to_numpy().flatten()
@@ -99,24 +105,35 @@ def deploy_control(*args, **kwargs):
 			# nominal values already checked within online_data_clean method
 
 			# calculate the reward value
-			rwd = rwd_processor.calculate_deployment_reward(**{'vars_next' : df,
-															   'rl_env_action' : stpt_scaled,
-															   'rbc_env_action' : hist_stpt_scaled})
+			rwd = rwd_processor.calculate_deployment_reward(**{'vars_next' : vars_next,
+															   'rl_env_action' : stpt_scaled[0],
+															   'rbc_env_action' : hist_stpt_scaled[0]})
 			# save rwd into a csv file
 			with open('deployment_reward.csv', 'a+') as cfile:
 					cfile.write('{},{:.3f}\n'.format( time_stamp, float(rwd) ))
 			cfile.close()
 
+			
+			# how long to wait form last training
+			to_relearn = False #last_relearn_steps > 6  # True if no issue with frequent relearning or False if no relearning at all
+
 			# TODO: decide whether relearning has to happen or not
-			relearn_triggered = False
-			if relearn_triggered:
+			if rt.reward_trigger_event(**{'file_name':'deployment_reward.csv'}) & to_relearn:
 				log.info('Deploy Control Module: Relearn has been Triggered')
 				# create train data
 				offline_data_gen_params.update({'time_stamp': time_stamp})
 				datagen.offline_data_gen(**offline_data_gen_params)
 				log.info('Deploy Control Module: Wait until controller has been relearned')
-				agent_weights_available.wait() # wait until new controller weights are generated
+				agent_weights_available.wait() # wait until new controller weights are generated TODO: remove in online
 				log.info('Deploy Control Module: Controller has been relearned')
+				last_relearn_steps = 0
+				# reload LSTM weights
+				with lstm_weights_lock:
+				# initiate reward_trigger class
+					rwd_processor.reload_models()
+					log.info('Reward Processor Module: LSTM Weights Reloaded from latest training phase')
+			else:
+				last_relearn_steps += 1
 
 									   
 
@@ -146,14 +163,18 @@ def deploy_control(*args, **kwargs):
 			# write output to file for our use
 			fout = np.concatenate((curr_obs_unscaled, stpt_unscaled, hist_stpt))
 			with open('experience.csv', 'a+') as cfile:
-				cfile.write('{}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}\n'.format(datetime.now(), fout[0],
+				cfile.write('{}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}\n'.format(time_stamp, fout[0],
 				fout[1], fout[2], fout[3], fout[4], fout[5], fout[6]))
 			cfile.close()
 
 			# advance by 30 mins for next step
 			time_stamp += timedelta(**{'days':0, 'hours':0, 'minutes':30, 'seconds':0})
 
-			# TODO: decide how to set end learning
+			# how to set end learning
+			year_num, week_num, _ = time_stamp.isocalendar()
+			if (year_num==2019) & (week_num==30):
+				end_learning.set()
+
 
 	except Exception as e:
 		log.error('Deploy Control Module: %s', str(e))
@@ -167,11 +188,21 @@ def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, sc
 	try:
 
 		log.info('Deploy Control Module: Getting Data from TSDB')
-		result_obj = client.query("select * from {} where time >= '{}' - {}w \
-								and time < '{}'".format(measurement, \
-								str(time_stamp),lookback_dur_min,str(time_stamp)))
-		df_= result_obj[measurement]
-		df_ = df_.drop(columns = ['data_cleaned', 'aggregated', 'time-interval'])
+		result_obj = client.query("select * from {} where time >= '{}' - {}m \
+								and time <= '{}'".format(measurement, \
+								str(time_stamp),lookback_dur_min,str(time_stamp)), dropna=False)
+		if len(result_obj.keys())!=0:  # no data available
+			df_= result_obj[measurement]
+			df_ = df_.drop(columns = ['data_cleaned', 'aggregated', 'time-interval'])
+
+			if (df_.empty) | (df_.isnull().any().any()) | (df_.shape[0]<6):
+				log.info('Deploy Control Module: TSDB returned data with incorrect info; using backup data')
+				df_ = read_pickle('data/trend_data/backup_tsdb.pkl')
+			else:
+				df_.to_pickle('data/trend_data/backup_tsdb.pkl')
+		else:
+			log.info('Deploy Control Module: TSDB returned empty data; using backup data')
+			df_ = read_pickle('data/trend_data/backup_tsdb.pkl')
 
 		# collect current set point
 		hist_stpt = df_.loc[df_.index[-1],['sat_stpt']].to_numpy().copy().flatten()
@@ -197,6 +228,7 @@ def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, sc
 		# scale the columns: here we will use min-max
 		df_[df_.columns] = scaler.minmax_scale(df_, df_.columns, df_.columns)
 
+		# collect scaled historical setpoint for reward calculation
 		hist_stpt_scaled = df_.loc[df_.index[-1],['sat_stpt']].to_numpy().copy().flatten()
 
 		# create avg_stpt column
@@ -204,6 +236,9 @@ def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, sc
 		df_['avg_stpt'] = df_[stpt_cols].mean(axis=1)
 		# drop individual set point cols
 		df_.drop( columns = stpt_cols, inplace = True)
+		vars_next = df_.copy()
+		print("df scaled and all:\n")
+		print(df_.columns)
 		# rearrange observation cols
 		df_ = df_[obs_space_vars]
 
@@ -213,9 +248,12 @@ def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, sc
 		# drop individual set point cols
 		df_unscaled.drop( columns = stpt_cols, inplace = True)
 		# rearrange observation cols
-		df_unscaled = df_unscaled[obs_space_vars] 
+		df_unscaled = df_unscaled[obs_space_vars]
 
-		return df_, df_unscaled, hist_stpt, hist_stpt_scaled
+		print("df scaled and for observed:\n")
+		print(df_.columns)
+
+		return df_, df_unscaled, hist_stpt, hist_stpt_scaled, vars_next
 
 	except Exception as e:
 		log.error('Deploy Control Module: %s', str(e))

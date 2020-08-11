@@ -43,7 +43,6 @@ def offline_data_gen(*args, **kwargs):
 		# Events
 		lstm_data_available : Event = kwargs['lstm_data_available']  # new data available for lstm relearning
 		env_data_available : Event = kwargs['env_data_available']  # new data available for env relearning  # pylint: disable=unused-variable
-		end_learning : Event = kwargs['end_learning'] 
 
 		# Locks
 		lstm_train_data_lock : Lock = kwargs['lstm_train_data_lock']  # prevent dataloop from writing data
@@ -53,76 +52,73 @@ def offline_data_gen(*args, **kwargs):
 		retrain_range_weeks = kwargs['retrain_range_weeks']
 		# rl retrain weeks
 		retrain_range_rl_weeks = kwargs['retrain_range_rl_weeks']
-		# week_num to end
-		# week2end = kwargs['week2end']
- 
 
 		client = DataFrameClient(host='localhost', port=8086, database=kwargs['database'],)
 
+		# condition 1 : data availability -- set to True to be always satisifed
+		data_unavailable = not (lstm_data_available.is_set() | env_data_available.is_set())  # or condition prevents faster overwrite for env data
+		# condition 2 : interval satisfied -- set to True to be always satisifed
+		interval_completed = True
+		# condition 3 : some error is crossing a threshold -- set to True to be always satisifed
+		error_trigger = True
+		# condition 4 : some reward measure is crossing a threshold -- set to True to be always satisifed
+		reward_trigger = True
+		if data_unavailable & interval_completed & error_trigger & reward_trigger:
 
-		while not end_learning.is_set():
+			log.info('OfflineDataGen: Getting Data from TSDB')
 
-			# condition 1 : data availability -- set to True to be always satisifed
-			data_unavailable = not (lstm_data_available.is_set() | env_data_available.is_set())  # or condition prevents faster overwrite for env data
-			# condition 2 : interval satisfied -- set to True to be always satisifed
-			interval_completed = True
-			# condition 3 : some error is crossing a threshold -- set to True to be always satisifed
-			error_trigger = True
-			# condition 4 : some reward measure is crossing a threshold -- set to True to be always satisifed
-			reward_trigger = True
-			if data_unavailable & interval_completed & error_trigger & reward_trigger:
+			result_obj = client.query("select * from {} where time >= '{}' - {}w \
+								and time < '{}'".format(kwargs['measurement'], str(time_stamp),retrain_range_weeks,str(time_stamp)))
+			df_env = result_obj[kwargs['measurement']]
+			df_env = df_env.drop(columns = ['data_cleaned', 'aggregated', 'time-interval'])
 
-				log.info('OfflineDataGen: Getting Data from TSDB')
-
-				result_obj = client.query("select * from {} where time >= '{}' - {}w \
-									and time < '{}'".format(kwargs['measurement'], str(time_stamp),retrain_range_weeks,str(time_stamp)))
-				df_env = result_obj[kwargs['measurement']]
-				df_env = df_env.drop(columns = ['data_cleaned', 'aggregated', 'time-interval'])
-
-				data_gen_process_cwe_th = Thread(target=data_gen_process_cwe, daemon=False,
-											kwargs={ 
-											'df' : result_obj[kwargs['measurement']].loc[:,kwargs['cwe_vars']],
-											'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'year_num': year_num,
-											'week_num': week_num, 'save_path':kwargs['save_path'], 'logger':log
-											})
-				data_gen_process_hwe_th = Thread(target=data_gen_process_hwe, daemon=False, 
-											kwargs={ 
-											'df' : result_obj[kwargs['measurement']].loc[:,kwargs['hwe_vars']],
-											'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'year_num': year_num,
-											'week_num': week_num, 'save_path':kwargs['save_path'], 'logger':log
-											})
-				data_gen_process_vlv_th = Thread(target=data_gen_process_vlv, daemon=False, 
-											kwargs={ 
-											'df' : result_obj[kwargs['measurement']].loc[:,kwargs['vlv_vars']],
-											'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'year_num': year_num,
-											'week_num': week_num, 'save_path':kwargs['save_path'], 'logger':log
-											})
-				data_gen_process_env_th = Thread(target=data_gen_process_env, daemon=False, 
-											kwargs={
-											'df' : df_env,
-											'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'logger':log,
-											'save_path':kwargs['save_path'], 'retrain_range_rl_weeks':retrain_range_rl_weeks
-											})
+			data_gen_process_cwe_th = Thread(target=data_gen_process_cwe, daemon=False,
+										kwargs={ 
+										'df' : result_obj[kwargs['measurement']].loc[:,kwargs['cwe_vars']],
+										'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'year_num': year_num,
+										'week_num': week_num, 'save_path':kwargs['save_path'], 'logger':log
+										})
+			data_gen_process_hwe_th = Thread(target=data_gen_process_hwe, daemon=False, 
+										kwargs={ 
+										'df' : result_obj[kwargs['measurement']].loc[:,kwargs['hwe_vars']],
+										'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'year_num': year_num,
+										'week_num': week_num, 'save_path':kwargs['save_path'], 'logger':log
+										})
+			data_gen_process_vlv_th = Thread(target=data_gen_process_vlv, daemon=False, 
+										kwargs={ 
+										'df' : result_obj[kwargs['measurement']].loc[:,kwargs['vlv_vars']],
+										'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'year_num': year_num,
+										'week_num': week_num, 'save_path':kwargs['save_path'], 'logger':log
+										})
+			data_gen_process_env_th = Thread(target=data_gen_process_env, daemon=False, 
+										kwargs={
+										'df' : df_env,
+										'agg': kwargs['agg'], 'scaler': kwargs['scaler'], 'logger':log,
+										'save_path':kwargs['save_path'], 'retrain_range_rl_weeks':retrain_range_rl_weeks
+										})
 
 
-				with lstm_train_data_lock:
-					data_gen_process_cwe_th.start()
-					data_gen_process_hwe_th.start()
-					data_gen_process_vlv_th.start()
-					data_gen_process_cwe_th.join()
-					data_gen_process_vlv_th.join()
-					data_gen_process_hwe_th.join()
-				lstm_data_available.set()  # data is now available for lstm training
-			
-				with env_train_data_lock:	
-					data_gen_process_env_th.start()
-					data_gen_process_env_th.join()
-				env_data_available.set()  # data is now available for agent and env training
+			with lstm_train_data_lock:
+				data_gen_process_cwe_th.start()
+				data_gen_process_hwe_th.start()
+				data_gen_process_vlv_th.start()
+				data_gen_process_cwe_th.join()
+				data_gen_process_vlv_th.join()
+				data_gen_process_hwe_th.join()
+			lstm_data_available.set()  # data is now available for lstm training
+		
+			with env_train_data_lock:	
+				data_gen_process_env_th.start()
+				data_gen_process_env_th.join()
+			env_data_available.set()  # data is now available for agent and env training
 
-				log.info('OfflineDataGen: Dynamic Model and Gym Env data available')
-				week_num += 1
-				week_num = week_num if week_num%53 != 0 else 1
-				year_num = year_num if week_num!= 1 else year_num+1
+			log.info('OfflineDataGen: Dynamic Model and Gym Env data available')
+			week_num += 1
+			week_num = week_num if week_num%53 != 0 else 1
+			year_num = year_num if week_num!= 1 else year_num+1
+
+		else:
+			raise Exception("Last iteration has not finished")
 	
 	except Exception as e:
 		log.error('Off-Line Data Generator Module: %s', str(e))
@@ -229,7 +225,7 @@ def data_gen_process_hwe(*args, **kwargs):
 		df = a_utils.df2operating_regions(df, ['hwe'], [0.001])
 
 		# determine split point for last 1 week test data
-		t_train_end = df.index[-1] - timedelta(weeks=13)
+		t_train_end = df.index[-1] - timedelta(weeks=6)
 		test_df = df.loc[t_train_end : , : ]
 		splitvalue = test_df.shape[0]
 

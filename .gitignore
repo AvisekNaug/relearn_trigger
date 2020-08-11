@@ -1,6 +1,7 @@
 # extensions
 *.pyc
 .ipynb_checkpoints
+.vscode
 
 # folders
 __pycache__
@@ -20,7 +21,6 @@ log.txt
 *.out
 experience.csv
 reheat_preheat_setpoint.txt
-trend_data
 sample_experience.csv
 sample_log.txt
 dashreq.txt

@@ -55,7 +55,7 @@ if __name__ == "__main__":
 		# how to set prediction sections
 		relearn_interval_kwargs = {'days':0, 'hours':12, 'minutes':0, 'seconds':0}
 		# weeks to look back into for retraining
-		retrain_range_weeks = 20
+		retrain_range_weeks = 15
 		# weeks to train rl on 
 		retrain_range_rl_weeks = 2
 		# use validation loss in lstm or not
@@ -65,11 +65,11 @@ if __name__ == "__main__":
 		# period of data; 1 => 5 mins, 6 => 30 mins
 		period = 6 
 		# num of steps to learn rl in each train method
-		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*60)
+		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*3)
 		# reinitialize agent at the end of every learning iteration
 		reinit_agent = True
 		# time stamp of the last time point in the 1 week test data; used to get tsdb data call
-		time_stamp = datetime(year = 2019, month = 6, day = 1, hour=0, minute=0, second=0)
+		time_stamp = datetime(year = 2019, month = 3, day = 1, hour=0, minute=0, second=0)
 		# time duration to look back at for querying deployment data
 		lookback_dur_min = 40
 		# week_num to end
@@ -175,7 +175,6 @@ if __name__ == "__main__":
 
 
 		offline_data_gen_params = {'lstm_data_available':lstm_data_available,
-									'end_learning':end_learning,
 									'lstm_train_data_lock':lstm_train_data_lock,
 									'lstm_weights_lock':lstm_weights_lock,
 									'relearn_interval_kwargs':relearn_interval_kwargs,
@@ -197,6 +196,7 @@ if __name__ == "__main__":
 		deploy_ctrl_th = Thread(target=doffline.deploy_control, daemon = False,
 							kwargs={'agent_weights_available' : agent_weights_available,
 									'agent_weights_lock' : agent_weights_lock,
+									'lstm_weights_lock' : lstm_weights_lock,
 									'obs_space_vars' : exp_params['env_config']['obs_space_vars'],
 									'scaler' : scaler,
 									'best_rl_agent_path' : best_rl_agent_path,
@@ -247,7 +247,7 @@ if __name__ == "__main__":
 		ctrl_learn_th.start()
 
 		try:
-			log.info('All threads started')
+			log.info('-----------------------All threads started-----------------')
 			ctrl_learn_th.join()
 			model_learn_th.join()
 			deploy_ctrl_th.join()

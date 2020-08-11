@@ -7,7 +7,9 @@ in keeping a single reward function for both alumni_env.py and here.
 
 
 import numpy as np
-from pandas import DataFrame
+from pandas import DataFrame, read_csv, to_datetime
+from scipy.stats import linregress
+
 
 import warnings
 with warnings.catch_warnings():
@@ -74,8 +76,8 @@ class deployment_reward_processor():
 		try:
 			# the obs variables of the environment and action taken by the deployed agent
 			s : DataFrame = kwargs['vars_next']
-			rl_a = kwargs['rl_set_point']
-			rbc_a  = kwargs['rbc_set_point']
+			rl_a = kwargs['rl_env_action']
+			rbc_a  = kwargs['rbc_env_action']
 
 			if not self.nomralized_data:
 				s[s.columns] = self.scaler.minmax_scale(s, s.columns, s.columns)
@@ -172,3 +174,46 @@ class deployment_reward_processor():
 		except Exception as e:
 			self.log.error('Reward Trigger Calculate Energy Module: %s', str(e))
 			self.log.debug(e, exc_info=True)
+
+
+def reward_trigger_event(*args, **kwargs):
+	"""
+	Observes a reward time series and decides if it is statistically menaningful or not
+	"""
+
+	# read the reward file
+	df : DataFrame = read_csv(kwargs['file_name'], )
+	assert all([df.columns[0] == 'time', df.columns[1] == 'reward']), "First two columns should be time(datetime format) and reward"
+	df['date_time'] = to_datetime(df['time'])
+	df.set_index(keys='date_time',inplace=True, drop = True)
+
+	return statistical_meaningfulness(**{'trend':df})
+
+def statistical_meaningfulness(*args, **kwargs):
+	"""
+	examine whether a statistical meaningful trend exists in the provided time series dataframe
+	"""
+	df : DataFrame = kwargs['trend']
+
+	x = df['time'].to_numpy().flatten()
+	y = df['reward'].to_numpy().flatten()
+
+	min_length = 24
+
+	# do not relearn if num of points is very low
+	if x.shape[0]<min_length:
+		return False
+
+	# consider last 12 hours; length of the sample = min_length
+	x = np.arange(start=1,step=1,stop=min_length+1)
+	y = y[-min_length:]
+
+	# calculate r2 and p_value : only for linear regression
+
+	_, _, r_value, p_value, _ = linregress(x, y)
+
+	if (r_value**2 > 0.65) & (p_value < 0.05):
+		return True
+	else:
+		return False
+
