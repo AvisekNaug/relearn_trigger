@@ -57,7 +57,7 @@ if __name__ == "__main__":
 		# weeks to look back into for retraining
 		retrain_range_weeks = 15
 		# weeks to train rl on 
-		retrain_range_rl_weeks = 2
+		retrain_range_rl_weeks = 5
 		# use validation loss in lstm or not
 		use_val = True
 		# number of epochs to train dynamic models
@@ -65,11 +65,13 @@ if __name__ == "__main__":
 		# period of data; 1 => 5 mins, 6 => 30 mins
 		period = 6 
 		# num of steps to learn rl in each train method
-		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*5)
+		rl_train_steps = int((60/(period*5))*24*7*retrain_range_rl_weeks*40)
 		# reinitialize agent at the end of every learning iteration
 		reinit_agent = True
 		# time stamp of the last time point in the 1 week test data; used to get tsdb data call
-		time_stamp = datetime(year = 2019, month = 4, day = 16, hour=0, minute=0, second=0)
+		time_stamp = datetime(year = 2019, month = 5, day = 1, hour=0, minute=0, second=0)
+		# when to end the experiment
+		end_stamp = datetime(year = 2019, month = 12, day = 1, hour=0, minute=0, second=0)
 		# time duration to look back at for querying deployment data
 		lookback_dur_min = 40
 		# week_num to end
@@ -97,7 +99,7 @@ if __name__ == "__main__":
 		utils.make_dirs(log_path)
 		# utils.make_dirs(results)
 		utils.make_dirs(rl_perf_data)
-		utils.make_dirs(trend_data)
+		# utils.make_dirs(trend_data)
 
 		# path to saved agent weights
 		best_rl_agent_path = 'models/best_rl_agent'
@@ -205,6 +207,7 @@ if __name__ == "__main__":
 									'reward_processor_params':reward_processor_params,
 									'offline_data_gen_params':offline_data_gen_params,
 									'time_stamp':time_stamp,
+									'end_stamp':end_stamp,
 									'lookback_dur_min':lookback_dur_min,
 									'database':'bdx_batch_db',
 									'measurement':'alumni_data_v2'})

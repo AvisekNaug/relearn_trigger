@@ -85,10 +85,10 @@ class deployment_reward_processor():
 				rbc_a = self.scaler.minmax_scale(rbc_a, self.a_name, self.a_name)
 			
 			reward_params = {'energy_saved': 100.0, 'energy_savings_thresh': 0.0,
-								'energy_penalty': -100.0, 'energy_reward_weight': 0.6,
-								'comfort': 10, 'comfort_thresh': 0.10,
-								'uncomfortable': 10, 'comfort_reward_weight': 0.2,
-								'heating_reward_weight':0.2,
+								'energy_penalty': -100.0, 'energy_reward_weight': 1.0,
+								'comfort': 10, 'comfort_thresh': 0.20,
+								'uncomfortable': 10, 'comfort_reward_weight': 1.0,
+								'heating_reward_weight':1.2,
 								'action_minmax':[np.array([65]), np.array([72])]
 								}
 			
@@ -101,26 +101,37 @@ class deployment_reward_processor():
 			reward_energy = reward_params['energy_saved']*(rbc_energy-rl_energy) \
 				if rbc_energy-rl_energy>reward_params['energy_savings_thresh'] \
 				else reward_params['energy_penalty']*(-rbc_energy+rl_energy)
+			# reward_energy = 1 if rbc_energy-rl_energy>reward_params['energy_savings_thresh'] \
+			# 			else -1
 
 			'''comfort reward '''
 			T_rl_disch = rl_a
 			# extract vrf average setpoint temperature
 			avg_vrf_stpt = s.loc[s.index[0], 'avg_stpt']
 			reward_comfort = reward_params['comfort']/(abs(T_rl_disch-avg_vrf_stpt) + 0.1) \
-			if abs(T_rl_disch-avg_vrf_stpt) < reward_params['comfort_thresh'] \
-			else reward_params['uncomfortable']*abs(T_rl_disch-avg_vrf_stpt)
+					if abs(T_rl_disch-avg_vrf_stpt) < reward_params['comfort_thresh'] \
+					else reward_params['uncomfortable']*abs(T_rl_disch-avg_vrf_stpt)
+			# reward_comfort = 1 if abs(T_rl_disch-avg_vrf_stpt) < reward_params['comfort_thresh'] else -1
 
 			'''reward less heating'''
 			oat_t = s.loc[s.index[0], 'oat']
-			if (oat_t>0.64):  # warm weather > 68F
-				reward_heating = -10.0*T_rl_disch
+			if (oat_t>0.62):  # warm weather > 68F
+				reward_heating = -60.0*T_rl_disch
 			else:
-				reward_heating = -0.1*T_rl_disch
+				reward_heating = -10.0*T_rl_disch
+			# if (oat_t>0.55):  # warm weather > 68F  (95.90-29.10)*0.62 + 29.10;70.516
+			# 	reward_heating = -T_rl_disch
+			# else:
+			# 	reward_heating = 0
+			# if T_rl_disch > 0.72:  # (73.61-57.905)*0.55+57.905
+			# 	reward_heating = -1.0
+			# else:
+			# 	reward_heating = 1.0
 
 			reward = reward_params['energy_reward_weight']*reward_energy + \
 				reward_params['comfort_reward_weight']*reward_comfort + reward_params['heating_reward_weight']*reward_heating
 
-			return reward
+			return reward, [rl_cwe, rl_hwe, rbc_cwe, rbc_hwe, rl_energy, rbc_energy]
 		
 		except Exception as e:
 			self.log.error('Reward Trigger Calculate Deplyment Reward Module: %s', str(e))

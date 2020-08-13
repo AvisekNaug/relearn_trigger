@@ -206,8 +206,8 @@ class Env(gym.Env):
 		reward_energy = self.params['energy_saved']*(hist_energy-rl_energy) \
 			if hist_energy-rl_energy>self.params['energy_savings_thresh'] \
 			else self.params['energy_penalty']*(-hist_energy+rl_energy)
-		# reward_energy = hist_energy-rl_energy
-		# reward_energy *= self.params['energy_reward_weight']  # don't weight it so that we can try ad hoc weights
+		# reward_energy = 1 if hist_energy-rl_energy>self.params['energy_savings_thresh'] \
+		# 				else -1
 		reward_energy /= 0.01*self.episode_length  # scale reward in case the episode lengths are not equal
 
 		'''Comfort Reward'''
@@ -219,16 +219,25 @@ class Env(gym.Env):
 		reward_comfort = self.params['comfort']/(abs(T_rl_disch-avg_vrf_stpt) + 0.1) \
 			if abs(T_rl_disch-avg_vrf_stpt) < self.params['comfort_thresh'] \
 			else self.params['uncomfortable']*abs(T_rl_disch-avg_vrf_stpt)
-		# reward_comfort = -1*abs(T_rl_disch-avg_vrf_stpt)
-		# reward_comfort *= self.params['comfort_reward_weight']  # don't weight it so that we can try ad hoc weights
+		# reward_comfort = 1 if abs(T_rl_disch-avg_vrf_stpt) < self.params['comfort_thresh'] else -1
 		reward_comfort /= 0.01*self.episode_length  # scale reward in case the episode lengths are not equal
 
 		'''Reward for less heating during higher temperatures'''
 		oat_t = s.loc[s.index[0], 'oat']
-		if (oat_t>0.70):  # warm weather > 68F
-			reward_heating = -40.0*T_rl_disch
+		if (oat_t>0.62):  # warm weather > 68F  (95.90-29.10)*0.62 + 29.10;70.516
+			reward_heating = -60.0*T_rl_disch
 		else:
-			reward_heating = -1.0*T_rl_disch
+			reward_heating = -10.0*T_rl_disch
+		# if (oat_t>0.55):  # warm weather > 68F  (95.90-29.10)*0.62 + 29.10;70.516
+		# if T_rl_disch > 0.72:  # (73.61-57.905)*0.72+57.905=69.21
+		# 	reward_heating = -4.0
+		# else:
+		#  	reward_heating = 4.0
+		# else:
+		# 	if T_rl_disch > 0.72:  # (73.61-57.905)*0.55+57.905
+		# 		reward_heating = -1.0
+		# 	else:
+		# 		reward_heating = 1.0
 		reward_heating /= 0.01*self.episode_length
 
 		# TODO: Create error component

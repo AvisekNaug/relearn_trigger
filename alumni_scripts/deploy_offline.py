@@ -31,13 +31,14 @@ def deploy_control(*args, **kwargs):
 	try:
 		with open('alumni_scripts/meta_data.json', 'r') as fp:
 			meta_data_ = json.load(fp)
-		if not path.exists("experience.csv"):
-			with open('experience.csv', 'a+') as cfile:
-				cfile.write('{},{},{},{},{},{},{},{}\n'.format('time', 'oat', 'oah', 'wbt',
-				'avg_stpt', 'sat', 'rlstpt', 'hist_stpt'))
-			cfile.close()
+		# if not path.exists("experience.csv"): TODO, uncomment for online training and make w to a+
+		with open('experience.csv', 'w') as cfile:
+			cfile.write('{},{},{},{},{},{},{},{}\n'.format('time', 'oat', 'oah', 'wbt',
+			'avg_stpt', 'sat', 'rlstpt', 'hist_stpt'))
+		cfile.close()
 		with open('deployment_reward.csv', 'w') as cfile:
-			cfile.write('{},{}\n'.format('time','reward'))
+			cfile.write('{},{},{},{},{},{},{},{}\n'.format('time','reward','rl_cwe', 'rl_hwe', 'rbc_cwe', \
+				 'rbc_hwe', 'rl_energy', 'rbc_energy'))
 		cfile.close()
 		with open('reward_trigger.csv', 'w') as cfile:
 			cfile.write('{},{}\n'.format('time','status'))
@@ -57,8 +58,11 @@ def deploy_control(*args, **kwargs):
 		not_first_loop = False
 		period = kwargs['period']
 		time_stamp = kwargs['time_stamp']
+		time_stamp_end = kwargs['end_stamp']
 		lookback_dur_min = kwargs['lookback_dur_min']
 		measurement = kwargs['measurement']
+		# backup set point
+		hist_stpt_backup = 68.0
 		# database client
 		client = DataFrameClient(host='localhost', port=8086, database=kwargs['database'],)
 		# number of deploymnet steps passed till last learning
@@ -89,7 +93,8 @@ def deploy_control(*args, **kwargs):
 			# get current scaled and uncsaled observation
 			df, df_unscaled, hist_stpt, hist_stpt_scaled, vars_next = get_real_obs(client, time_stamp, meta_data_, obs_space_vars,
 														 scaler, period, log,
-														lookback_dur_min, measurement)
+														lookback_dur_min, measurement, hist_stpt_backup)
+			hist_stpt_backup = hist_stpt
 			curr_obs_scaled = df.to_numpy().flatten()
 			curr_obs_unscaled = df_unscaled.to_numpy().flatten()
 
@@ -108,12 +113,13 @@ def deploy_control(*args, **kwargs):
 			# nominal values already checked within online_data_clean method
 
 			# calculate the reward value
-			rwd = rwd_processor.calculate_deployment_reward(**{'vars_next' : vars_next,
+			rwd, energy_info = rwd_processor.calculate_deployment_reward(**{'vars_next' : vars_next,
 															   'rl_env_action' : stpt_scaled[0],
 															   'rbc_env_action' : hist_stpt_scaled[0]})
 			# save rwd into a csv file
 			with open('deployment_reward.csv', 'a+') as cfile:
-					cfile.write('{},{:.3f}\n'.format( time_stamp, float(rwd) ))
+					cfile.write('{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format( time_stamp, float(rwd), \
+						energy_info[0], energy_info[1], energy_info[2], energy_info[3], energy_info[4], energy_info[5]))
 			cfile.close()
 
 			
@@ -182,7 +188,6 @@ def deploy_control(*args, **kwargs):
 			time_stamp += timedelta(**{'days':0, 'hours':0, 'minutes':30, 'seconds':0})
 
 			# how to set end learning
-			time_stamp_end = datetime(year = 2019, month = 6, day = 15, hour=0, minute=0, second=0)
 			if time_stamp > time_stamp_end:
 				end_learning.set()
 
@@ -194,7 +199,7 @@ def deploy_control(*args, **kwargs):
 
 
 def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, scaler, period, log, 
-							lookback_dur_min, measurement):
+							lookback_dur_min, measurement, hist_stpt_backup):
 
 	try:
 
@@ -214,9 +219,11 @@ def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, sc
 		else:
 			log.info('Deploy Control Module: TSDB returned empty data; using backup data')
 			df_ = read_pickle('data/trend_data/backup_tsdb.pkl')
-
-		# collect current set point
-		hist_stpt = df_.loc[df_.index[-1],['sat_stpt']].to_numpy().copy().flatten()
+		
+		# pathogenic case where hist set point is unavailable from TSDB
+		if 'sat_stpt' not in df_.columns:
+			log.info('Deploy Control Module: TSDB has no sat_stpt; adding last backup value as column')
+			df_['sat_stpt'] = hist_stpt_backup
 
 		# clip less than 0 values
 		df_.clip(lower=0, inplace=True)
@@ -229,6 +236,9 @@ def get_real_obs(client, time_stamp, meta_data_: dict, obs_space_vars : list, sc
 		df_[rolling_sum_target] =  a_utils.window_sum(df_, window_size=6, column_names=rolling_sum_target)
 		df_[rolling_mean_target] =  a_utils.window_mean(df_, window_size=6, column_names=rolling_mean_target)
 		df_ = a_utils.dropNaNrows(df_)
+
+		# collect current set point
+		hist_stpt = df_.loc[df_.index[-1],['sat_stpt']].to_numpy().copy().flatten()
 
 		# Sample the last half hour data
 		df_ = df_.iloc[[-1],:]
